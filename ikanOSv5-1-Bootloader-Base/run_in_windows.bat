@@ -1,0 +1,1 @@
+qemu-system-i386 -drive file=fs.img,format=raw -monitor stdio -vga virtio
