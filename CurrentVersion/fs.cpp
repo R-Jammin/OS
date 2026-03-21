@@ -21,6 +21,31 @@ void diskReadSector(uint32_t sectorNumber, uint8_t *destinationMemory, bool cach
     if (!cacheActive)
     {
         // ASSIGNMENT 2 TO DO
+        //step 1
+    diskStatusCheck();
+
+  //step2
+    outputIOPort(PRIMARY_ATA_SECTOR_COUNT_REGISTER, 1);
+
+    //step 3 and 4
+    outputIOPort(PRIMARY_ATA_SECTOR_LOWBYTE_NUMBER, (uint8_t)(sectorNumber & 0xFF));          // Low byte
+    outputIOPort(PRIMARY_ATA_SECTOR_MIDBYTE_NUMBER,  (uint8_t)((sectorNumber >> 8) & 0xFF));   // Mid byte
+    outputIOPort(PRIMARY_ATA_SECTOR_HIGHBYTE_NUMBER, (uint8_t)((sectorNumber >> 16) & 0xFF));  // High byte
+
+  //5 with shift
+    outputIOPort(PRIMARY_ATA_DRIVE_HEADER_REGISTER, 0xE0 | ((sectorNumber >> 24) & 0x0F));
+
+ //read step 6
+    outputIOPort(PRIMARY_ATA_COMMAND_STATUS_REGISTER, ATA_READ);
+
+//7
+    diskStatusCheck();
+
+   //8
+    ioPortWordToMem((uint16_t)PRIMARY_ATA_DATA_REGISTER, destinationMemory, SECTOR_SIZE / 2U);
+
+
+
     }
     else
     {        
@@ -117,6 +142,24 @@ void diskWriteSector(uint32_t sectorNumber, uint8_t *sourceMemory, bool cacheAct
      
     
     // ASSIGNMENT 2 TO DO
+    diskStatusCheck();
+
+
+    outputIOPort(PRIMARY_ATA_SECTOR_COUNT_REGISTER, 1);
+
+    outputIOPort(PRIMARY_ATA_SECTOR_LOWBYTE_NUMBER, (uint8_t)(sectorNumber & 0xFF));          // Low byte
+    outputIOPort(PRIMARY_ATA_SECTOR_MIDBYTE_NUMBER,  (uint8_t)((sectorNumber >> 8) & 0xFF));   // Mid byte
+    outputIOPort(PRIMARY_ATA_SECTOR_HIGHBYTE_NUMBER, (uint8_t)((sectorNumber >> 16) & 0xFF));  // High byte
+
+    outputIOPort(PRIMARY_ATA_DRIVE_HEADER_REGISTER, 0xE0 | ((sectorNumber >> 24) & 0x0F));
+
+    outputIOPort(PRIMARY_ATA_COMMAND_STATUS_REGISTER, ATA_WRITE);
+
+    
+    diskStatusCheck();
+
+    memToIoPortWord((uint16_t)PRIMARY_ATA_DATA_REGISTER, sourceMemory, SECTOR_SIZE / 2U);
+    
 
 }
 
@@ -582,13 +625,85 @@ void writeBufferToDisk(struct globalObjectTableEntry *openFile, uint32_t inodeEn
 void loadElfFile(uint8_t *elfHeaderLocation)
 {    
     // ASSIGNMENT 2 TO DO
+if (elfHeaderLocation == nullptr) return;//Null check
 
+    
+    struct elfHeader *elf = (struct elfHeader *)elfHeaderLocation;
+    struct pHeader *programHeaders = (struct pHeader *)(elfHeaderLocation + elf->e_phoff);
+
+    //Iterate through each program header
+    for (uint16_t i = 0; i < elf->e_phnum; i++) {
+        struct pHeader *ph = &programHeaders[i];
+
+        if (ph->p_type != 1)
+            continue;
+
+        // Calculate source and dest
+        uint8_t *segmentSrc = elfHeaderLocation + ph->p_offset;
+        uint8_t *segmentDst = (uint8_t *)ph->p_vaddr;
+
+        // Convert bytes into words
+        uint32_t numWords = ph->p_memsz / 2; 
+        if (ph->p_memsz % 2 != 0) //Round up as if for ceiling
+            numWords++; 
+
+        //Copy the segment into memory
+        memoryCopy((uint8_t *)segmentSrc, (uint8_t *)segmentDst, numWords);
+    }
 }
 
 void loadFileFromInodeStruct(uint8_t *inodeStructMemory, uint8_t *fileBuffer, bool cacheActive)
 {
 
     // ASSIGNMENT 2 TO DO
+     if (inodeStructMemory == nullptr || fileBuffer == nullptr) return;// Null check
+
+    struct inode *inode = (struct inode *)inodeStructMemory;
+
+    
+    const int DIRECT_COUNT = 12;
+    const int SINGLE_INDIRECT_INDEX = 12;
+    const int INDIRECT_ENTRIES = BLOCK_SIZE / sizeof(uint32_t);
+
+    // 1 Parse direct blocks
+    for (uint16_t i = 0; i < DIRECT_COUNT; ++i) {
+        uint32_t blk = inode->i_block[i];
+        if (blk == 0) {
+            // no block: zero out the region and advance
+            storeValueAtMemLoc(fileBuffer, BLOCK_SIZE);
+        } else {
+            // read the block directly into the destination buffer
+            readBlock(blk, fileBuffer,cacheActive);
+        }
+        fileBuffer += BLOCK_SIZE;
+    }
+
+    // 2 Read first indirect block and copy its pointers into an array
+    uint32_t indirect_blk = inode->i_block[SINGLE_INDIRECT_INDEX];
+    if (indirect_blk == 0) {
+        for (int i = 0; i < INDIRECT_ENTRIES; ++i) {
+            storeValueAtMemLoc(fileBuffer, BLOCK_SIZE);
+            fileBuffer += BLOCK_SIZE;
+        }
+        return;
+    }
+
+    // BLOCK_SIZE is small 
+    uint32_t indirect_entries[INDIRECT_ENTRIES];
+
+    // Read the indirect block 
+    readBlock(indirect_blk, (uint8_t *)indirect_entries,cacheActive);
+
+    // 3 Treat each entry as another direct block and loop
+    for (int i = 0; i < INDIRECT_ENTRIES; ++i) {
+        uint32_t blk = indirect_entries[i];
+        if (blk == 0) {
+            storeValueAtMemLoc(fileBuffer, BLOCK_SIZE);
+        } else {
+            readBlock(blk, fileBuffer, cacheActive);
+        }
+        fileBuffer += BLOCK_SIZE;
+    }
 }
 
 

@@ -2133,7 +2133,6 @@ void printString(uint32_t color, uint32_t row, uint32_t column, uint8_t *message
 {
 
     // ASSIGNMENT 1 TO DO
-    const int SCREEN_WIDTH = 80, SCREEN_HEIGHT = 25;
     uint32_t curRow = row;
     uint32_t curCol = column;
 
@@ -2143,20 +2142,20 @@ void printString(uint32_t color, uint32_t row, uint32_t column, uint8_t *message
 
         // Handle special characters (mirroring printCharacter behavior)
         if (message[i] == '\n') {
-            curRow = (curRow + 1) % SCREEN_HEIGHT;
+            curRow = (curRow + 1) % 25;
             curCol = 0;
         } else if (message[i] == '\t') {
             const uint32_t tabWidth = 4;
             curCol = ((curCol / tabWidth) + 1) * tabWidth;
-            if (curCol >= SCREEN_WIDTH) {
+            if (curCol >= 80) {
                 curCol = 0;
-                curRow = (curRow + 1) % SCREEN_HEIGHT;
+                curRow = (curRow + 1) % 25;
             }
         } else if (message[i] != '\r') { // normal char
             curCol++;
-            if (curCol >= SCREEN_WIDTH) {
+            if (curCol >= 80) {
                 curCol = 0;
-                curRow = (curRow + 1) % SCREEN_HEIGHT;
+                curRow = (curRow + 1) % 25;
             }
         }
     }
@@ -2172,8 +2171,7 @@ void clearScreen()
 {       
     
     // ASSIGNMENT 1 TO DO
-    const int SCREEN_WIDTH = 80, SCREEN_HEIGHT = 25;
-     for(uint32_t i=0;i<SCREEN_WIDTH*SCREEN_HEIGHT*2; ++i)
+     for(uint32_t i=0;i<80*25*2; ++i)
         VIDEO_RAM[i]=0;
 
     
@@ -2194,7 +2192,6 @@ void printCharacter(uint32_t color, uint32_t row, uint32_t column, uint8_t *mess
 {
     
     // ASSIGNMENT 1 TO DO
-    const int SCREEN_WIDTH = 80, SCREEN_HEIGHT = 25;
     moveCursor(row, column);
 
     // Handle special characters
@@ -2203,15 +2200,15 @@ void printCharacter(uint32_t color, uint32_t row, uint32_t column, uint8_t *mess
     }
 
     if (*message == 0x0A) { // newline
-        moveCursor((row + 1) % SCREEN_HEIGHT, 0);
+        moveCursor((row + 1) % 25, 0);
         return;
     }
 
     if (*message == 0x09) { // tab
         const uint32_t tabWidth = 4;
         uint32_t nextTab = ((column / tabWidth) + 1) * tabWidth;
-        if (nextTab >= SCREEN_WIDTH) {
-            row = (row + 1) % SCREEN_HEIGHT;
+        if (nextTab >= 80) {
+            row = (row + 1) % 25;
             nextTab = 0;
         }
         moveCursor(row, nextTab);
@@ -2219,7 +2216,7 @@ void printCharacter(uint32_t color, uint32_t row, uint32_t column, uint8_t *mess
     }
 
     // print normal character
-    uint32_t offset = (row * SCREEN_WIDTH + column) * 2;
+    uint32_t offset = (row * 80 + column) * 2;
     VIDEO_RAM[offset] = *message;
     VIDEO_RAM[offset + 1] = (uint8_t)color;
     
