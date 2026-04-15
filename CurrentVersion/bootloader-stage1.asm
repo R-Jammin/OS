@@ -9,59 +9,49 @@ bits 16
 
 ;; load bootloader-stage2 (first 64 KB) to this location in memory
 
+    ;; load bootloader-stage2 (first 64 KB) to this location in memory
+
     ;; ASSIGNMENT 1 TO DO
 
-    mov ah, 02h
-mov al, 128
-mov ch, 0
-mov cl, 02
-mov dh, 0
-xor bx, bx
-mov ds, bx
-mov es, bx
-mov bx, 0x8000
-int 13h
-
+    mov ah, 0x02        ; BIOS read sectors
+    mov al, 128         ; read 128 sectors
+    mov ch, 0           ; cylinder 0
+    mov cl, 2           ; start at sector 2
+    mov dh, 0           ; head 0
+    mov bx, 0x0800
+    mov es, bx          ; ES = 0x0800
+    mov bx, 0x0000      ; ES:BX = 0x8000
+    int 0x13
 
 
 ;; load bootloader-stage2 (second 64 KB) to this location in memory
 
     ;; ASSIGNMENT 1 TO DO
 
-    ;;es is necessary for extra segment registers such as video memory. Very possibly neccesary for this assignment
-;;Memory at 0x18000
-    mov ah, 02h
-    mov al, 128
-    mov ch, 0
-    mov cl, 0x82
-    mov dh, 0
-    xor bx, bx
-    mov es, bx
-
+    mov ah, 0x02        ; BIOS read sectors
+    mov al, 128         ; read next 128 sectors
+    mov ch, 3           ; continue on cylinder 3
+    mov cl, 4           ; sector 4
+    mov dh, 1           ; head 1
     mov bx, 0x1800
-    mov es, bx
-    mov bx, 0x0000 
-    int 13h
-
+    mov es, bx          ; ES = 0x1800
+    mov bx, 0x0000      ; ES:BX = 0x18000
+    int 0x13
 
 
 ;; load bootloader-stage2 (third 64 KB) to this location in memory
 
     ;; ASSIGNMENT 1 TO DO
-    mov ah, 02h
-    mov al, 128
-    mov ch, 0
-    mov cl, 0x82
-    mov dh, 0
-    xor bx, bx
-    mov es, bx
 
+    mov ah, 0x02        ; BIOS read sectors
+    mov al, 128         ; read final 128 sectors
+    mov ch, 7           ; continue on cylinder 7
+    mov cl, 6           ; sector 6
+    mov dh, 0           ; head 0
     mov bx, 0x2800
-    mov es, bx
-    mov bx, 0x0000 
-    int 13h
-
-
+    mov es, bx          ; ES = 0x2800
+    mov bx, 0x0000      ; ES:BX = 0x28000
+    int 0x13
 
 ;; switch to protected mode
     cli

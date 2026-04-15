@@ -623,32 +623,38 @@ void writeBufferToDisk(struct globalObjectTableEntry *openFile, uint32_t inodeEn
 
 
 void loadElfFile(uint8_t *elfHeaderLocation)
-{    
-    // ASSIGNMENT 2 TO DO
-if (elfHeaderLocation == nullptr) return;//Null check
+{
+    //parse elf header at provided memory address
+    struct elfHeader *ELFHeader = (struct elfHeader *)elfHeaderLocation;
 
-    
-    struct elfHeader *elf = (struct elfHeader *)elfHeaderLocation;
-    struct pHeader *programHeaders = (struct pHeader *)(elfHeaderLocation + elf->e_phoff);
+    //find start of program header table using offset in elf header
+    struct pHeader *ProgramHeader =
+        (struct pHeader *)(elfHeaderLocation + ELFHeader->e_phoff);
 
-    //Iterate through each program header
-    for (uint16_t i = 0; i < elf->e_phnum; i++) {
-        struct pHeader *ph = &programHeaders[i];
+    //loop through all program headers
+    for (uint16_t currentProgramHeader = 0;
+         currentProgramHeader < ELFHeader->e_phnum;
+         currentProgramHeader++)
+    {
+        //only load program headers of type PT_LOAD
+        if (ProgramHeader[currentProgramHeader].p_type == PT_LOAD)
+        {
+            //source location inside loaded elf file
+            uint8_t *sourceMemory =
+                elfHeaderLocation + ProgramHeader[currentProgramHeader].p_offset;
 
-        if (ph->p_type != 1)
-            continue;
+            //destination preferred memory location
+            uint8_t *destinationMemory =
+                (uint8_t *)ProgramHeader[currentProgramHeader].p_vaddr;
 
-        // Calculate source and dest
-        uint8_t *segmentSrc = elfHeaderLocation + ph->p_offset;
-        uint8_t *segmentDst = (uint8_t *)ph->p_vaddr;
-
-        // Convert bytes into words
-        uint32_t numWords = ph->p_memsz / 2; 
-        if (ph->p_memsz % 2 != 0) //Round up as if for ceiling
-            numWords++; 
-
-        //Copy the segment into memory
-        memoryCopy((uint8_t *)segmentSrc, (uint8_t *)segmentDst, numWords);
+            //copy segment to destination
+            //p_filesz is bytes, memoryCopy uses words
+            memoryCopy(
+                sourceMemory,
+                destinationMemory,
+                ceiling(ProgramHeader[currentProgramHeader].p_filesz, 2)
+            );
+        }
     }
 }
 
