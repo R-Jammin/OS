@@ -13,9 +13,54 @@
 
 
 void initializePageTables(uint32_t pid)
-{     
-    // ASSIGNMENT 3 TO DO
-} 
+{
+    //compute position of tables based on pid
+
+    //get pointers to pdir base and ptable base
+    uint32_t pageDirLocation = PAGE_DIR_BASE + ((pid - 1) * MAX_PGTABLES_SIZE);
+    uint32_t firstPageTableLocation = pageDirLocation + PAGE_SIZE;
+
+    //zero mem
+
+    //first entry = pageuser present rw
+
+    //keybord RDWRITE
+    //pidinfo is ro
+
+    uint32_t *pageDirectory = (uint32_t *)pageDirLocation;
+    uint32_t *pageTables = (uint32_t *)firstPageTableLocation;
+    uint32_t *lapicPageTable = (uint32_t *)(firstPageTableLocation + (PAGE_SIZE * 4));
+
+    fillMemory((uint8_t *)pageDirLocation, 0x0, PAGE_SIZE);
+    fillMemory((uint8_t *)firstPageTableLocation, 0x0, (PAGE_SIZE * 5));
+
+    pageDirectory[0] = firstPageTableLocation | PG_USER_PRESENT_RW;
+    pageDirectory[1] = (firstPageTableLocation + PAGE_SIZE) | PG_USER_PRESENT_RW;
+    pageDirectory[2] = (firstPageTableLocation + (PAGE_SIZE * 2)) | PG_USER_PRESENT_RW;
+    pageDirectory[3] = (firstPageTableLocation + (PAGE_SIZE * 3)) | PG_USER_PRESENT_RW;
+    pageDirectory[1019] = (firstPageTableLocation + (PAGE_SIZE * 4)) | PG_KERNEL_PRESENT_RW;
+
+    pageTables[0] = 0x0 | PG_USER_PRESENT_RW;
+    pageTables[KEYBOARD_BUFFER / PAGE_SIZE] = KEYBOARD_BUFFER | PG_USER_PRESENT_RW;
+    pageTables[USER_PID_INFO / PAGE_SIZE] = USER_PID_INFO | PG_USER_PRESENT_RO;
+    pageTables[STDERR_BUFFER / PAGE_SIZE] = STDERR_BUFFER | PG_USER_PRESENT_RO;
+    pageTables[SECOND_PROC_TMP_STACK / PAGE_SIZE] = SECOND_PROC_TMP_STACK | PG_KERNEL_PRESENT_RW;
+    pageTables[SECOND_PROC_SIPI_CODE / PAGE_SIZE] = SECOND_PROC_SIPI_CODE | PG_KERNEL_PRESENT_RW;
+    pageTables[GDT_LOC / PAGE_SIZE] = GDT_LOC | PG_USER_PRESENT_RO;
+
+    pageTables[((uint32_t)VIDEO_RAM) / PAGE_SIZE] = ((uint32_t)VIDEO_RAM) | PG_USER_PRESENT_RW;
+    pageTables[(((uint32_t)VIDEO_RAM) / PAGE_SIZE) + 1] = (((uint32_t)VIDEO_RAM) + PAGE_SIZE) | PG_USER_PRESENT_RW;
+
+    for (uint32_t addr = KERNEL_BASE; addr < KERNEL_LIMIT; addr += PAGE_SIZE)
+    {
+        pageTables[addr / PAGE_SIZE] = addr | PG_KERNEL_PRESENT_RW;
+    }
+
+    for (uint32_t i = 0; i < ENTRIES_PER_PAGE_TABLE; i++)
+    {
+        lapicPageTable[i] = (LAPIC_PAGE + (i * PAGE_SIZE)) | PG_KERNEL_PRESENT_RW;
+    }
+}
 
 
 void fillMemory(uint8_t *memLocation, uint8_t byteToFill, uint32_t numberOfBytes)
@@ -130,31 +175,104 @@ void updateTaskState(uint32_t pid, uint16_t state)
     while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
 }
 
+
 uint32_t requestSpecificPage(uint32_t pid, uint8_t *pageMemoryLocation, uint8_t perms)
 {
-    
-    // ASSIGNMENT 3 TO DO
+    while (!acquireLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
 
-    return 0; // Remove me when doing the assignment
-    
+    uint32_t frameNumber = allocateFrame(pid, (uint8_t *)PAGEFRAME_MAP_BASE);
+    if (frameNumber == 0)
+    {
+        while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
+        return 0;
+    }
+
+    uint32_t ptLocation = ((pid - 1) * MAX_PGTABLES_SIZE) + PAGE_TABLE_BASE;
+    uint32_t pageNumber = ((uint32_t)pageMemoryLocation / PAGE_SIZE);
+    uint32_t *pageEntry = (uint32_t *)(ptLocation + (pageNumber * 4));
+
+    if (*pageEntry != 0x0)
+    {
+        freeFrame(frameNumber);
+        while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
+        return 0;
+    }
+
+    *pageEntry = (frameNumber * PAGE_SIZE) | perms;
+
+    while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
+    return 1;
 }
 
 uint8_t *findBuffer(uint32_t pid, uint32_t numberOfPages, uint8_t perms)
 {
-    
-    // ASSIGNMENT 3 TO DO
+    (void)perms;
 
-    return 0; // Remove me when doing the assignment
+    uint32_t ptLocation = ((pid - 1) * MAX_PGTABLES_SIZE) + PAGE_TABLE_BASE;
+    uint32_t startPage = TEMP_FILE_START_LOC / PAGE_SIZE;
+    uint32_t endPage = USER_SPACE_LIMIT / PAGE_SIZE;
+
+    uint32_t contiguousPages = 0;
+    uint32_t firstPage = 0;
+
+    for (uint32_t currentPage = startPage; currentPage <= endPage; currentPage++)
+    {
+        uint32_t pageEntry = *(uint32_t *)(ptLocation + (currentPage * 4));
+
+        if (pageEntry == 0x0)
+        {
+            if (contiguousPages == 0)
+            {
+                firstPage = currentPage;
+            }
+
+            contiguousPages++;
+
+            if (contiguousPages == numberOfPages)
+            {
+                return (uint8_t *)(firstPage * PAGE_SIZE);
+            }
+        }
+        else
+        {
+            contiguousPages = 0;
+        }
+    }
+
+    return 0;
 }
-
 
 uint8_t *requestAvailablePage(uint32_t pid, uint8_t perms)
 {
-    
-    // ASSIGNMENT 3 TO DO
+    while (!acquireLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
 
-    return 0; // Remove me when doing the assignment
-    
+    uint32_t frameNumber = allocateFrame(pid, (uint8_t *)PAGEFRAME_MAP_BASE);
+    if (frameNumber == 0)
+    {
+        while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
+        return 0;
+    }
+
+    uint32_t ptLocation = ((pid - 1) * MAX_PGTABLES_SIZE) + PAGE_TABLE_BASE;
+    uint32_t startPage = TEMP_FILE_START_LOC / PAGE_SIZE;
+    uint32_t endPage = USER_SPACE_LIMIT / PAGE_SIZE;
+
+    for (uint32_t currentPage = startPage; currentPage <= endPage; currentPage++)
+    {
+        uint32_t *pageEntry = (uint32_t *)(ptLocation + (currentPage * 4));
+
+        if (*pageEntry == 0x0)
+        {
+            *pageEntry = (frameNumber * PAGE_SIZE) | perms;
+
+            while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
+            return (uint8_t *)(currentPage * PAGE_SIZE);
+        }
+    }
+
+    freeFrame(frameNumber);
+    while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
+    return 0;
 }
 
 void freePage(uint32_t pid, uint8_t *pageToFree)
