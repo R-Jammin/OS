@@ -14,33 +14,37 @@
 
 void initializePageTables(uint32_t pid)
 {
-    //compute position of tables based on pid
-
-    //get pointers to pdir base and ptable base
+    // Compute the position of this process's paging structures.
+    // PID 1 starts at PAGE_DIR_BASE.
+    // PID 2 starts at PAGE_DIR_BASE + MAX_PGTABLES_SIZE.
     uint32_t pageDirLocation = PAGE_DIR_BASE + ((pid - 1) * MAX_PGTABLES_SIZE);
     uint32_t firstPageTableLocation = pageDirLocation + PAGE_SIZE;
 
-    //zero mem
-
-    //first entry = pageuser present rw
-
-    //keybord RDWRITE
-    //pidinfo is ro
-
+    // Get pointers to the page directory, the first page table,
+    // and the fifth page table used for LAPIC mappings.
     uint32_t *pageDirectory = (uint32_t *)pageDirLocation;
     uint32_t *pageTables = (uint32_t *)firstPageTableLocation;
     uint32_t *lapicPageTable = (uint32_t *)(firstPageTableLocation + (PAGE_SIZE * 4));
 
+    // Clear the page directory and all 5 page tables before filling them in.
     fillMemory((uint8_t *)pageDirLocation, 0x0, PAGE_SIZE);
     fillMemory((uint8_t *)firstPageTableLocation, 0x0, (PAGE_SIZE * 5));
 
+    // The first four page directory entries point to the first four page tables.
+    // These cover the low 16 MB of virtual memory.
     pageDirectory[0] = firstPageTableLocation | PG_USER_PRESENT_RW;
     pageDirectory[1] = (firstPageTableLocation + PAGE_SIZE) | PG_USER_PRESENT_RW;
     pageDirectory[2] = (firstPageTableLocation + (PAGE_SIZE * 2)) | PG_USER_PRESENT_RW;
     pageDirectory[3] = (firstPageTableLocation + (PAGE_SIZE * 3)) | PG_USER_PRESENT_RW;
+
+    // The fifth entry from the top of the page directory is index 1019.
+    // This points to the fifth page table, which is used for LAPIC mappings.
     pageDirectory[1019] = (firstPageTableLocation + (PAGE_SIZE * 4)) | PG_KERNEL_PRESENT_RW;
 
+    // Map virtual address 0x0 in the first page table as user read/write.
     pageTables[0] = 0x0 | PG_USER_PRESENT_RW;
+
+    // Map special low-memory regions required by the assignment.
     pageTables[KEYBOARD_BUFFER / PAGE_SIZE] = KEYBOARD_BUFFER | PG_USER_PRESENT_RW;
     pageTables[USER_PID_INFO / PAGE_SIZE] = USER_PID_INFO | PG_USER_PRESENT_RO;
     pageTables[STDERR_BUFFER / PAGE_SIZE] = STDERR_BUFFER | PG_USER_PRESENT_RO;
@@ -48,14 +52,20 @@ void initializePageTables(uint32_t pid)
     pageTables[SECOND_PROC_SIPI_CODE / PAGE_SIZE] = SECOND_PROC_SIPI_CODE | PG_KERNEL_PRESENT_RW;
     pageTables[GDT_LOC / PAGE_SIZE] = GDT_LOC | PG_USER_PRESENT_RO;
 
-    pageTables[((uint32_t)VIDEO_RAM) / PAGE_SIZE] = ((uint32_t)VIDEO_RAM) | PG_USER_PRESENT_RW;
-    pageTables[(((uint32_t)VIDEO_RAM) / PAGE_SIZE) + 1] = (((uint32_t)VIDEO_RAM) + PAGE_SIZE) | PG_USER_PRESENT_RW;
+    // Map two pages starting at VIDEO_RAM as user read/write.
+    pageTables[((uint32_t)VIDEO_RAM) / PAGE_SIZE] =
+        ((uint32_t)VIDEO_RAM) | PG_USER_PRESENT_RW;
+    pageTables[(((uint32_t)VIDEO_RAM) / PAGE_SIZE) + 1] =
+        (((uint32_t)VIDEO_RAM) + PAGE_SIZE) | PG_USER_PRESENT_RW;
 
+    // Identity-map all 8 MB of kernel space as kernel read/write.
     for (uint32_t addr = KERNEL_BASE; addr < KERNEL_LIMIT; addr += PAGE_SIZE)
     {
         pageTables[addr / PAGE_SIZE] = addr | PG_KERNEL_PRESENT_RW;
     }
 
+    // Fill the fifth page table with identity-mapped LAPIC entries.
+    // This maps 0xFEC00000 through 0xFEFFF000 as kernel read/write.
     for (uint32_t i = 0; i < ENTRIES_PER_PAGE_TABLE; i++)
     {
         lapicPageTable[i] = (LAPIC_PAGE + (i * PAGE_SIZE)) | PG_KERNEL_PRESENT_RW;
@@ -165,6 +175,7 @@ uint32_t initializeTask(uint32_t ppid, uint16_t state, uint32_t stack, uint8_t *
 
 void updateTaskState(uint32_t pid, uint16_t state)
 {
+    
     while (!acquireLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
     
     uint32_t taskStructLocation = PROCESS_TABLE_LOC + (TASK_STRUCT_SIZE * (pid - 1));
@@ -175,11 +186,12 @@ void updateTaskState(uint32_t pid, uint16_t state)
     while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
 }
 
-
 uint32_t requestSpecificPage(uint32_t pid, uint8_t *pageMemoryLocation, uint8_t perms)
 {
+    // Acquire lock on the process table before modifying page tables.
     while (!acquireLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
 
+    // Allocate a physical frame for this process.
     uint32_t frameNumber = allocateFrame(pid, (uint8_t *)PAGEFRAME_MAP_BASE);
     if (frameNumber == 0)
     {
@@ -187,10 +199,16 @@ uint32_t requestSpecificPage(uint32_t pid, uint8_t *pageMemoryLocation, uint8_t 
         return 0;
     }
 
+    // Compute the location of this process's first page table.
     uint32_t ptLocation = ((pid - 1) * MAX_PGTABLES_SIZE) + PAGE_TABLE_BASE;
-    uint32_t pageNumber = ((uint32_t)pageMemoryLocation / PAGE_SIZE);
-    uint32_t *pageEntry = (uint32_t *)(ptLocation + (pageNumber * 4));
 
+    // Convert the requested virtual address into a page number.
+    uint32_t pageNumber = (uint32_t)pageMemoryLocation / PAGE_SIZE;
+
+    // Get a pointer to the page table entry for that virtual page.
+    uint32_t *pageEntry = (uint32_t *)(ptLocation + (pageNumber * sizeof(uint32_t)));
+
+    // If the page is already mapped, free the frame we just allocated and fail.
     if (*pageEntry != 0x0)
     {
         freeFrame(frameNumber);
@@ -198,27 +216,35 @@ uint32_t requestSpecificPage(uint32_t pid, uint8_t *pageMemoryLocation, uint8_t 
         return 0;
     }
 
+    // Insert the physical frame address and permissions into the page table entry.
     *pageEntry = (frameNumber * PAGE_SIZE) | perms;
 
+    // Release lock and report success.
     while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
     return 1;
 }
 
 uint8_t *findBuffer(uint32_t pid, uint32_t numberOfPages, uint8_t perms)
 {
+    // perms is unused here because this function only searches for space.
     (void)perms;
 
+    // Compute the base of this process's first page table.
     uint32_t ptLocation = ((pid - 1) * MAX_PGTABLES_SIZE) + PAGE_TABLE_BASE;
+
+    // Search begins at TEMP_FILE_START_LOC and continues through user space.
     uint32_t startPage = TEMP_FILE_START_LOC / PAGE_SIZE;
     uint32_t endPage = USER_SPACE_LIMIT / PAGE_SIZE;
 
     uint32_t contiguousPages = 0;
     uint32_t firstPage = 0;
 
+    // First-fit scan through the valid virtual page range.
     for (uint32_t currentPage = startPage; currentPage <= endPage; currentPage++)
     {
-        uint32_t pageEntry = *(uint32_t *)(ptLocation + (currentPage * 4));
+        uint32_t pageEntry = *(uint32_t *)(ptLocation + (currentPage * sizeof(uint32_t)));
 
+        // A page table entry of 0 means the page is currently unmapped.
         if (pageEntry == 0x0)
         {
             if (contiguousPages == 0)
@@ -228,6 +254,7 @@ uint8_t *findBuffer(uint32_t pid, uint32_t numberOfPages, uint8_t perms)
 
             contiguousPages++;
 
+            // Once enough contiguous pages are found, return the starting address.
             if (contiguousPages == numberOfPages)
             {
                 return (uint8_t *)(firstPage * PAGE_SIZE);
@@ -235,17 +262,21 @@ uint8_t *findBuffer(uint32_t pid, uint32_t numberOfPages, uint8_t perms)
         }
         else
         {
+            // Reset the first-fit count when a used page is encountered.
             contiguousPages = 0;
         }
     }
 
+    // No suitable contiguous range was found.
     return 0;
 }
 
 uint8_t *requestAvailablePage(uint32_t pid, uint8_t perms)
 {
+    // Acquire lock on the process table before modifying page tables.
     while (!acquireLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
 
+    // Allocate a physical frame for this process.
     uint32_t frameNumber = allocateFrame(pid, (uint8_t *)PAGEFRAME_MAP_BASE);
     if (frameNumber == 0)
     {
@@ -253,16 +284,21 @@ uint8_t *requestAvailablePage(uint32_t pid, uint8_t perms)
         return 0;
     }
 
+    // Compute the base of this process's first page table.
     uint32_t ptLocation = ((pid - 1) * MAX_PGTABLES_SIZE) + PAGE_TABLE_BASE;
+
+    // Search begins at TEMP_FILE_START_LOC and continues through user space.
     uint32_t startPage = TEMP_FILE_START_LOC / PAGE_SIZE;
     uint32_t endPage = USER_SPACE_LIMIT / PAGE_SIZE;
 
+    // Find the first unmapped page in the allowed range.
     for (uint32_t currentPage = startPage; currentPage <= endPage; currentPage++)
     {
-        uint32_t *pageEntry = (uint32_t *)(ptLocation + (currentPage * 4));
+        uint32_t *pageEntry = (uint32_t *)(ptLocation + (currentPage * sizeof(uint32_t)));
 
         if (*pageEntry == 0x0)
         {
+            // Map the newly allocated physical frame into this virtual page.
             *pageEntry = (frameNumber * PAGE_SIZE) | perms;
 
             while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
@@ -270,6 +306,7 @@ uint8_t *requestAvailablePage(uint32_t pid, uint8_t perms)
         }
     }
 
+    // If no virtual page was available, free the frame and fail.
     freeFrame(frameNumber);
     while (!releaseLock(KERNEL_OWNED, (uint8_t *)PROCESS_TABLE_LOC)) {}
     return 0;
